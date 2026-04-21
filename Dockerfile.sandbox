@@ -1,0 +1,31 @@
+# ============================================
+# Genoma Sandbox — Isolated Script Execution
+# Contains Python 3.12 + Node.js 20 (minimal)
+# ============================================
+
+FROM debian:bookworm-slim
+
+# Install Python and Node.js
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        python3 python3-pip \
+        nodejs npm && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Remove network tools for security
+RUN apt-get purge -y curl wget && \
+    rm -f /usr/bin/curl /usr/bin/wget 2>/dev/null || true
+
+# Create workspace directory
+RUN mkdir -p /workspace && chown 65534:65534 /workspace
+
+# Copy sandbox wrappers
+COPY scripts/sandbox_wrapper.py /workspace/sandbox_wrapper.py
+COPY scripts/sandbox_wrapper.js /workspace/sandbox_wrapper.js
+
+# Set non-root user
+USER 65534:65534
+WORKDIR /workspace
+
+CMD ["echo", "sandbox ready"]

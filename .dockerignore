@@ -1,0 +1,41 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Build artifacts
+bin/
+dist/
+tmp/
+*.exe
+*.test
+*.out
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+coverage.out
+coverage.html
+
+# Docker (avoid recursive context)
+docker-compose*.yml
+
+# Docs and tests (not needed in build)
+docs/
+tests/
+README.md
+
+# Embeddings (built separately)
+embeddings/
