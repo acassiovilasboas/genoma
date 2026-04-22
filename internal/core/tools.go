@@ -65,6 +65,27 @@ func (tr *ToolRegistry) List() []string {
 	return names
 }
 
+// ToolInfo holds the public metadata of a registered tool.
+type ToolInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+// ListInfo returns name and description for every registered tool.
+func (tr *ToolRegistry) ListInfo() []ToolInfo {
+	tr.mu.RLock()
+	defer tr.mu.RUnlock()
+
+	infos := make([]ToolInfo, 0, len(tr.tools))
+	for _, tool := range tr.tools {
+		infos = append(infos, ToolInfo{
+			Name:        tool.Name(),
+			Description: tool.Description(),
+		})
+	}
+	return infos
+}
+
 // ValidateNodeTools checks if all tools referenced by a node are registered.
 func (tr *ToolRegistry) ValidateNodeTools(node *NodeDefinition) error {
 	tr.mu.RLock()

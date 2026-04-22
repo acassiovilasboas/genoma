@@ -113,6 +113,49 @@ func main() {
 	// Semantic router
 	semanticRouter := core.NewSemanticRouter(embeddingClient, unified, stateBus, 0.7)
 
+	// Flow scheduler — executor closure loads the graph from DB each time.
+	scheduleExecutor := func(sCtx context.Context, flowID string, input map[string]any) (*core.FlowResult, error) {
+		flowRow, err := relRepo.GetFlowGraph(sCtx, flowID)
+		if err != nil {
+			return nil, fmt.Errorf("load flow %s: %w", flowID, err)
+		}
+		if flowRow == nil {
+			return nil, fmt.Errorf("flow not found: %s", flowID)
+		}
+
+		graph := core.NewFlowGraph(flowRow.Name, flowRow.Description)
+		graph.ID = flowRow.ID
+		for _, nodeID := range flowRow.NodeIDs {
+			nodeRow, err := relRepo.GetNodeDefinition(sCtx, nodeID)
+			if err != nil || nodeRow == nil {
+				return nil, fmt.Errorf("node not found: %s", nodeID)
+			}
+			nodeDef := &core.NodeDefinition{
+				ID:            nodeRow.ID,
+				Name:          nodeRow.Name,
+				Purpose:       nodeRow.Purpose,
+				InputSchema:   nodeRow.InputSchema,
+				OutputSchema:  nodeRow.OutputSchema,
+				ScriptLang:    core.ScriptLanguage(nodeRow.ScriptLang),
+				ScriptContent: nodeRow.ScriptContent,
+				MaxRetries:    nodeRow.MaxRetries,
+				TimeoutSec:    nodeRow.TimeoutSec,
+				CreatedAt:     nodeRow.CreatedAt,
+				UpdatedAt:     nodeRow.UpdatedAt,
+			}
+			graph.AddNode(nodeDef)
+		}
+		var edges []*core.Edge
+		if err := json.Unmarshal(flowRow.Edges, &edges); err == nil {
+			graph.Edges = append(graph.Edges, edges...)
+		}
+		graph.EntryNodeID = flowRow.EntryNodeID
+		return orchestrator.Execute(sCtx, graph, input)
+	}
+
+	scheduler := core.NewFlowScheduler(stateBus, scheduleExecutor)
+	go scheduler.Start(ctx)
+
 	// --- HTTP Server ---
 	r := chi.NewRouter()
 
@@ -137,7 +180,7 @@ func main() {
 	})
 
 	// Register ADI routes
-	adiHandler := adi.NewHandler(relRepo, docRepo, vecRepo, unified, sandboxExec, orchestrator, semanticRouter)
+	adiHandler := adi.NewHandler(relRepo, docRepo, vecRepo, unified, sandboxExec, orchestrator, semanticRouter, toolRegistry, scheduler, stateBus)
 	adiHandler.RegisterRoutes(r)
 
 	// Register Chat routes

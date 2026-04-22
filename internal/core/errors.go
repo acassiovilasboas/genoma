@@ -125,3 +125,17 @@ type ErrSandboxSecurity struct {
 func (e *ErrSandboxSecurity) Error() string {
 	return fmt.Sprintf("sandbox security violation: %s", e.Reason)
 }
+
+// --- Human-in-the-loop Errors ---
+
+// ErrAwaitingHuman indicates the flow has paused and requires human feedback to continue.
+// The node signalled this by including "_await_human: true" in its output.
+type ErrAwaitingHuman struct {
+	RunID  string
+	NodeID string
+	Prompt string
+}
+
+func (e *ErrAwaitingHuman) Error() string {
+	return fmt.Sprintf("run %s paused at node %s awaiting human input", e.RunID, e.NodeID)
+}
