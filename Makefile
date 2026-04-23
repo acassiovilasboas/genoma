@@ -1,15 +1,19 @@
-.PHONY: build run test test-int lint clean migrate-up migrate-down docker-up docker-down fmt vet
+.PHONY: build build-mcp run test test-int lint clean migrate-up migrate-down docker-up docker-down fmt vet
 
 # Variables
 BINARY_NAME=genoma
 BUILD_DIR=bin
 MAIN_PATH=./cmd/genoma
+MCP_PATH=./cmd/mcp
 GO=go
 DOCKER_COMPOSE=docker compose
 
 # Build
 build:
 	$(GO) build -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PATH)
+
+build-mcp:
+	$(GO) build -o $(BUILD_DIR)/genoma-mcp $(MCP_PATH)
 
 build-linux:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -o $(BUILD_DIR)/$(BINARY_NAME)-linux $(MAIN_PATH)

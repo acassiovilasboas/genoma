@@ -20,11 +20,16 @@ COPY . .
 # Ensure go.sum is correct and all deps are downloaded
 RUN go mod tidy
 
-# Build static binary
+# Build static binaries
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-w -s" \
     -o /app/genoma \
     ./cmd/genoma
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags="-w -s" \
+    -o /app/genoma-mcp \
+    ./cmd/mcp
 
 # Stage 2: Runtime
 FROM alpine:3.19
@@ -34,6 +39,7 @@ RUN apk --no-cache add ca-certificates docker-cli
 WORKDIR /app
 
 COPY --from=builder /app/genoma .
+COPY --from=builder /app/genoma-mcp .
 COPY scripts/ /app/scripts/
 COPY internal/persistence/migrations/ /app/migrations/
 
