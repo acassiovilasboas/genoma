@@ -135,9 +135,11 @@ type HITLState struct {
 	// NodeOutput is the waiting node's output with internal fields stripped.
 	NodeOutput map[string]any `json:"node_output"`
 	// NodeInput is the input the waiting node received — used as originalInput when resuming.
-	NodeInput map[string]any           `json:"node_input"`
-	NodeRuns  map[string]*NodeInstance `json:"node_runs"`
-	CreatedAt time.Time                `json:"created_at"`
+	NodeInput   map[string]any           `json:"node_input"`
+	NodeRuns    map[string]*NodeInstance `json:"node_runs"`
+	// FlowContext holds the ambient context that was active when the flow paused.
+	FlowContext map[string]any           `json:"flow_context,omitempty"`
+	CreatedAt   time.Time                `json:"created_at"`
 }
 
 // SetHITLState persists the human-in-the-loop state for a flow run.

@@ -26,8 +26,9 @@ type Message struct {
 
 // ChatRequest is the REST chat message request.
 type ChatRequest struct {
-	SessionID string `json:"session_id"`
-	Message   string `json:"message"`
+	SessionID   string         `json:"session_id"`
+	Message     string         `json:"message"`
+	FlowContext map[string]any `json:"flow_context,omitempty"`
 }
 
 // ChatResponse is the REST chat response.
@@ -102,7 +103,7 @@ func (h *Handler) HandleMessage(w http.ResponseWriter, r *http.Request) {
 	flowResult, err := h.orchestrator.Execute(r.Context(), routeResult.FlowGraph, map[string]any{
 		"message":    req.Message,
 		"session_id": req.SessionID,
-	})
+	}, req.FlowContext)
 
 	resp := ChatResponse{
 		SessionID: req.SessionID,
@@ -197,7 +198,7 @@ func (h *Handler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
 			flowResult, err := h.orchestrator.Execute(ctx, routeResult.FlowGraph, map[string]any{
 				"message":    m.Content,
 				"session_id": sessionID,
-			})
+			}, nil)
 
 			reply := "Ocorreu um erro ao processar sua solicitação."
 			if err == nil && flowResult.Output != nil {

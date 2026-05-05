@@ -150,7 +150,7 @@ func main() {
 			graph.Edges = append(graph.Edges, edges...)
 		}
 		graph.EntryNodeID = flowRow.EntryNodeID
-		return orchestrator.Execute(sCtx, graph, input)
+		return orchestrator.Execute(sCtx, graph, input, nil)
 	}
 
 	scheduler := core.NewFlowScheduler(stateBus, scheduleExecutor)

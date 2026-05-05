@@ -93,6 +93,7 @@ func (e *Executor) Execute(ctx context.Context, req core.ExecutionRequest) (*cor
 		Tty:          false,
 		User:         "65534:65534", // nobody
 		WorkingDir:   "/workspace",
+		Env:          toEnvSlice(req.EnvVars),
 	}
 
 	hostConfig := &container.HostConfig{
@@ -277,6 +278,19 @@ func (e *Executor) Ping(ctx context.Context) error {
 // Close releases the Docker client resources.
 func (e *Executor) Close() error {
 	return e.dockerClient.Close()
+}
+
+// toEnvSlice converts a map of env var names to values into the "KEY=VALUE" slice
+// expected by the Docker container config.
+func toEnvSlice(vars map[string]string) []string {
+	if len(vars) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(vars))
+	for k, v := range vars {
+		out = append(out, k+"="+v)
+	}
+	return out
 }
 
 // --- Tar helper ---

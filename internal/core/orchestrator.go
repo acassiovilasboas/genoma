@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -20,10 +21,11 @@ type SandboxExecutorInterface interface {
 
 // ExecutionRequest represents a script execution request for the sandbox.
 type ExecutionRequest struct {
-	Script   string         `json:"script"`
-	Language ScriptLanguage `json:"language"`
-	Input    map[string]any `json:"input,omitempty"`
-	Limits   *ResourceLimits `json:"limits,omitempty"`
+	Script   string            `json:"script"`
+	Language ScriptLanguage    `json:"language"`
+	Input    map[string]any    `json:"input,omitempty"`
+	Limits   *ResourceLimits   `json:"limits,omitempty"`
+	EnvVars  map[string]string `json:"env_vars,omitempty"`
 }
 
 // ExecutionResult represents the result of a sandbox execution.
@@ -77,6 +79,7 @@ type FlowOrchestrator struct {
 type runState struct {
 	mu       sync.RWMutex
 	nodeRuns map[string]*NodeInstance
+	flowCtx  map[string]any // ambient context merged into every node's input
 }
 
 func (rs *runState) set(nodeID string, instance *NodeInstance) {
@@ -114,7 +117,9 @@ func NewFlowOrchestrator(
 }
 
 // Execute runs a flow graph from its entry node to completion.
-func (fo *FlowOrchestrator) Execute(ctx context.Context, graph *FlowGraph, input map[string]any) (*FlowResult, error) {
+// flowCtx is an optional ambient context merged into every node's input without
+// overriding node-level data. Use it for session-scoped values such as tenant_id.
+func (fo *FlowOrchestrator) Execute(ctx context.Context, graph *FlowGraph, input map[string]any, flowCtx map[string]any) (*FlowResult, error) {
 	// Validate graph before execution
 	if err := graph.Validate(); err != nil {
 		return nil, fmt.Errorf("graph validation failed: %w", err)
@@ -146,7 +151,7 @@ func (fo *FlowOrchestrator) Execute(ctx context.Context, graph *FlowGraph, input
 	}()
 
 	// Track all node instances (thread-safe across parallel branches)
-	rs := &runState{nodeRuns: make(map[string]*NodeInstance)}
+	rs := &runState{nodeRuns: make(map[string]*NodeInstance), flowCtx: flowCtx}
 
 	// Emit flow started event
 	fo.emitEvent(ctx, "flow.started", runID, graph.EntryNodeID, map[string]any{
@@ -257,10 +262,12 @@ func (fo *FlowOrchestrator) executeNode(
 	execCtx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
+	sandboxInput := mergeContext(input, rs.flowCtx)
 	result, err := fo.sandbox.Execute(execCtx, ExecutionRequest{
 		Script:   node.ScriptContent,
 		Language: node.ScriptLang,
-		Input:    input,
+		Input:    sandboxInput,
+		EnvVars:  resolveEnvVars(node.EnvVars),
 	})
 	if err != nil {
 		if instance.CanRetry(node) {
@@ -311,14 +318,15 @@ func (fo *FlowOrchestrator) executeNode(
 		fo.stateBus.SetNodeState(ctx, runID, nodeID, instance)
 
 		hitlState := &HITLState{
-			RunID:      runID,
-			FlowID:     graph.ID,
-			WaitNodeID: nodeID,
-			Prompt:     prompt,
-			NodeOutput: cleanOutput,
-			NodeInput:  input,
-			NodeRuns:   rs.snapshot(),
-			CreatedAt:  time.Now(),
+			RunID:       runID,
+			FlowID:      graph.ID,
+			WaitNodeID:  nodeID,
+			Prompt:      prompt,
+			NodeOutput:  cleanOutput,
+			NodeInput:   input,
+			NodeRuns:    rs.snapshot(),
+			FlowContext: rs.flowCtx,
+			CreatedAt:   time.Now(),
 		}
 		fo.stateBus.SetHITLState(ctx, hitlState)
 
@@ -463,7 +471,7 @@ func (fo *FlowOrchestrator) Resume(ctx context.Context, state *HITLState, graph 
 	}()
 
 	// Restore the accumulated node run state from before the pause.
-	rs := &runState{nodeRuns: make(map[string]*NodeInstance, len(state.NodeRuns))}
+	rs := &runState{nodeRuns: make(map[string]*NodeInstance, len(state.NodeRuns)), flowCtx: state.FlowContext}
 	for k, v := range state.NodeRuns {
 		rs.nodeRuns[k] = v
 	}
@@ -573,6 +581,34 @@ func (fo *FlowOrchestrator) Resume(ctx context.Context, state *HITLState, graph 
 	})
 
 	return result, execErr
+}
+
+// mergeContext returns a new map with flowCtx merged into base.
+// Values in base take precedence so node data is never overridden.
+func mergeContext(base, flowCtx map[string]any) map[string]any {
+	if len(flowCtx) == 0 {
+		return base
+	}
+	out := make(map[string]any, len(base)+len(flowCtx))
+	for k, v := range flowCtx {
+		out[k] = v
+	}
+	for k, v := range base {
+		out[k] = v
+	}
+	return out
+}
+
+// resolveEnvVars reads the named environment variables from the host process.
+func resolveEnvVars(names []string) map[string]string {
+	if len(names) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(names))
+	for _, name := range names {
+		out[name] = os.Getenv(name)
+	}
+	return out
 }
 
 // emitEvent publishes an event to the event bus.

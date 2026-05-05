@@ -60,6 +60,9 @@ type NodeDefinition struct {
 	// TimeoutSec is the execution timeout in seconds.
 	TimeoutSec int `json:"timeout_sec"`
 
+	// EnvVars lists host environment variable names whose values are forwarded to the sandbox.
+	EnvVars []string `json:"env_vars,omitempty"`
+
 	// Metadata holds arbitrary key-value pairs.
 	Metadata map[string]any `json:"metadata,omitempty"`
 

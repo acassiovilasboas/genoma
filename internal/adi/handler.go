@@ -326,7 +326,7 @@ func (h *Handler) ExecuteFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.orchestrator.Execute(r.Context(), graph, req.Input)
+	result, err := h.orchestrator.Execute(r.Context(), graph, req.Input, nil)
 	if err != nil {
 		var awaitErr *core.ErrAwaitingHuman
 		if errors.As(err, &awaitErr) {
