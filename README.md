@@ -12,6 +12,7 @@
 - **Human-in-the-Loop (HITL)** — Flows can pause and request human feedback before continuing.
 - **Flow Scheduler** — Schedule flow executions for a future timestamp.
 - **Knowledge Base** — Ingest and semantically search documents via pgvector.
+- **Local LLM (Ollama)** — OpenAI-compatible local inference. Node scripts call any Ollama model via HTTP with zero cloud dependency.
 - **MCP Server** — Expose Genoma as an MCP tool server for Claude Desktop and Claude Code.
 - **Hybrid Persistence** — PostgreSQL (JSONB + pgvector) + Redis state bus.
 
@@ -215,6 +216,139 @@ Or add to your project's `.mcp.json`:
 | `genoma_list_tools`        | List built-in node tools                         |
 | `genoma_list_schedules`    | List scheduled flow executions                   |
 
+## Local LLM — Ollama
+
+The stack includes [Ollama](https://ollama.com) as a sidecar, exposing an **OpenAI-compatible API** at `http://ollama:11434`. Node scripts call it directly via HTTP — no SDK, no cloud account required.
+
+### How it works
+
+1. Ollama starts alongside the rest of the stack via `docker compose up`.
+2. The `ollama-init` service pulls the default model once on first boot.
+3. Your nodes declare `"env_vars": ["GENOMA_OLLAMA_URL", "GENOMA_OLLAMA_MODEL"]` to receive the endpoint and model name at runtime.
+4. The sandbox calls `POST /v1/chat/completions` (OpenAI wire format) against `http://ollama:11434`.
+
+> **Network requirement:** sandbox containers run with the network disabled by default (`GENOMA_SANDBOX_NO_NETWORK=true`). Nodes that call Ollama must set this to `false` — either globally in the compose file or per-node via `"limits": {"network_disabled": false}` in the execution request.
+
+### Available models
+
+| Model | Disk | Recommended for |
+|---|---|---|
+| `qwen2.5:0.5b` | ~395 MB | Testing, CI, embedded (default) |
+| `qwen2.5:3b` | ~2 GB | Reasoning, code tasks |
+| `llama3.2:3b` | ~2 GB | General-purpose agents |
+| `mistral:7b` | ~4.1 GB | Complex instruction following |
+| `codellama:7b` | ~3.8 GB | Code generation nodes |
+| `nomic-embed-text` | ~274 MB | Drop-in embeddings replacement |
+
+Change the default model in two places:
+
+```yaml
+# docker-compose.yml — genoma service
+GENOMA_OLLAMA_MODEL: llama3.2:3b
+
+# docker-compose.yml — ollama-init service
+entrypoint: ["ollama", "pull", "llama3.2:3b"]
+```
+
+Pull additional models at any time without restarting:
+
+```bash
+docker compose exec ollama ollama pull mistral:7b
+```
+
+### Calling the LLM from a node — Python
+
+```python
+import json, os, sys, urllib.request
+
+data = json.load(sys.stdin)
+
+url   = os.environ["GENOMA_OLLAMA_URL"] + "/v1/chat/completions"
+model = os.environ["GENOMA_OLLAMA_MODEL"]
+
+payload = json.dumps({
+    "model": model,
+    "messages": [{"role": "user", "content": data["prompt"]}],
+    "stream": False,
+}).encode()
+
+req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+with urllib.request.urlopen(req) as resp:
+    body = json.loads(resp.read())
+
+print(json.dumps({"reply": body["choices"][0]["message"]["content"]}))
+```
+
+Create the node with network enabled:
+
+```json
+POST /api/v1/nodes
+{
+  "name": "llm-reply",
+  "purpose": "Generate a reply using the local LLM",
+  "script_lang": "python",
+  "script_content": "<script above>",
+  "env_vars": ["GENOMA_OLLAMA_URL", "GENOMA_OLLAMA_MODEL"],
+  "timeout_sec": 120
+}
+```
+
+### Calling the LLM from a node — Node.js
+
+```js
+const data = JSON.parse(require("fs").readFileSync("/dev/stdin", "utf8"));
+
+const res = await fetch(process.env.GENOMA_OLLAMA_URL + "/v1/chat/completions", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    model: process.env.GENOMA_OLLAMA_MODEL,
+    messages: [{ role: "user", content: data.prompt }],
+    stream: false,
+  }),
+});
+const body = await res.json();
+process.stdout.write(JSON.stringify({ reply: body.choices[0].message.content }));
+```
+
+### AI-to-AI pipelines
+
+Because each node is an independent script and the output of one becomes the input of the next, you can chain LLM calls across nodes. Each node may use a different model, a different prompt, or a different strategy — the orchestrator handles sequencing, retries, and state.
+
+```
+User message
+    │
+    ▼
+[Node A — llm-extract]        ← extracts structured data from free text
+    │  output: {entities, intent}
+    ▼
+[Node B — llm-reason]         ← reasons over entities, produces plan
+    │  output: {steps}
+    ▼
+[Node C — llm-synthesise]     ← writes final answer in natural language
+    │  output: {reply}
+    ▼
+Response
+```
+
+Each node declares `"env_vars": ["GENOMA_OLLAMA_URL", "GENOMA_OLLAMA_MODEL"]` and calls the local Ollama API. The Genoma orchestrator validates input/output contracts between nodes, enforces timeouts and retries, and can pause the pipeline at any node for human review (HITL).
+
+### GPU acceleration
+
+Uncomment the `deploy` block in `docker-compose.yml` under the `ollama` service:
+
+```yaml
+deploy:
+  resources:
+    reservations:
+      devices:
+        - driver: nvidia
+          count: all
+          capabilities: [gpu]
+```
+
+Requires the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html).
+
 ## Environment Variables
 
 | Variable                      | Default                        | Description                                      |
@@ -236,6 +370,9 @@ Or add to your project's `.mcp.json`:
 | `GENOMA_REDIS_DB`             | `0`                            | Redis database index                             |
 | `GENOMA_EMBEDDING_URL`        | `http://localhost:5050`        | Embeddings micro-service URL                     |
 | `GENOMA_EMBEDDING_DIMS`       | `384`                          | Embedding vector dimensions                      |
+| `GENOMA_OLLAMA_URL`           | `http://localhost:11434`       | Ollama base URL (OpenAI-compatible)              |
+| `GENOMA_OLLAMA_MODEL`         | `qwen2.5:0.5b`                 | Default model forwarded to node scripts          |
+| `GENOMA_OLLAMA_TIMEOUT`       | `120s`                         | Ollama request timeout                           |
 | `GENOMA_SANDBOX_IMAGE`        | `genoma-sandbox:latest`        | Docker image used for node execution             |
 | `GENOMA_DOCKER_HOST`          | `unix:///var/run/docker.sock`  | Docker socket path                               |
 | `GENOMA_SANDBOX_MEMORY_MB`    | `256`                          | Sandbox container memory limit (MB)              |
@@ -267,6 +404,8 @@ graph TD
     Persist --> PG[(PostgreSQL + pgvector)]
     Persist --> Cache[(Redis)]
     Sandbox --> Containers[Isolated Containers]
+    Containers -->|POST /v1/chat/completions| Ollama[Ollama :11434]
+    Ollama --> Models[(Local Models)]
     Embeddings[Embeddings Service :5050] --> Router
 ```
 

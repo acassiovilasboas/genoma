@@ -21,6 +21,8 @@ services:
       GENOMA_DB_NAME: genoma
       GENOMA_REDIS_ADDR: redis:6379
       GENOMA_EMBEDDING_URL: http://embeddings:5050
+      GENOMA_OLLAMA_URL: http://ollama:11434
+      GENOMA_OLLAMA_MODEL: qwen2.5:0.5b
       GENOMA_SANDBOX_IMAGE: genoma-sandbox:latest
       GENOMA_DOCKER_HOST: unix:///var/run/docker.sock
     volumes:
@@ -75,6 +77,47 @@ services:
     image: genoma-sandbox:latest
     entrypoint: ["echo", "sandbox image built"]
 
+  # === Ollama (Local LLM) ===
+  # API OpenAI-compatible em http://ollama:11434
+  # Nos scripts dos nós: POST http://ollama:11434/v1/chat/completions
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollamadata:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - genoma-net
+    restart: unless-stopped
+    # Para GPU NVIDIA, descomente:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # Baixa o modelo padrão na primeira inicialização
+  # Troque "qwen2.5:0.5b" por outro modelo se quiser (ex: llama3.2:3b, mistral:7b)
+  ollama-init:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["ollama", "pull", "qwen2.5:0.5b"]
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    networks:
+      - genoma-net
+    restart: "no"
+
   # === Embeddings Micro-service ===
   embeddings:
     build:
@@ -95,6 +138,7 @@ services:
 volumes:
   pgdata:
   redisdata:
+  ollamadata:
 
 networks:
   genoma-net:

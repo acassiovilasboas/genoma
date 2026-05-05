@@ -14,6 +14,7 @@ type Config struct {
 	Redis     RedisConfig
 	Sandbox   SandboxConfig
 	Embedding EmbeddingConfig
+	Ollama    OllamaConfig
 	Auth      AuthConfig
 }
 
@@ -72,6 +73,13 @@ type EmbeddingConfig struct {
 	Timeout    time.Duration
 }
 
+// OllamaConfig holds local LLM (Ollama) configuration.
+type OllamaConfig struct {
+	BaseURL      string
+	DefaultModel string
+	Timeout      time.Duration
+}
+
 // AuthConfig holds authentication configuration.
 type AuthConfig struct {
 	APIKey string
@@ -116,6 +124,11 @@ func Load() *Config {
 			ServiceURL: getEnv("GENOMA_EMBEDDING_URL", "http://localhost:5050"),
 			Dimensions: getEnvInt("GENOMA_EMBEDDING_DIMS", 384),
 			Timeout:    getEnvDuration("GENOMA_EMBEDDING_TIMEOUT", 10*time.Second),
+		},
+		Ollama: OllamaConfig{
+			BaseURL:      getEnv("GENOMA_OLLAMA_URL", "http://localhost:11434"),
+			DefaultModel: getEnv("GENOMA_OLLAMA_MODEL", "qwen2.5:0.5b"),
+			Timeout:      getEnvDuration("GENOMA_OLLAMA_TIMEOUT", 120*time.Second),
 		},
 		Auth: AuthConfig{
 			APIKey: getEnv("GENOMA_API_KEY", ""),
